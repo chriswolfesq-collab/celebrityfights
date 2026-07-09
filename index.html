@@ -13,6 +13,7 @@
     <main class="game-shell">
       <section class="arena-wrap" aria-label="Celebrity Clash Arcade game">
         <canvas id="game" width="1280" height="720"></canvas>
+        <button id="muteButton" class="mute-button" type="button">Mute</button>
 
         <div id="selectScreen" class="select-screen">
           <div class="title-stack">
@@ -26,6 +27,7 @@
         <div id="roundBanner" class="round-banner">Round 1</div>
 
         <div id="battleUI" class="battle-ui hidden">
+          <div id="aiTell" class="ai-tell"></div>
           <div class="action-menu">
             <button type="button" class="move-btn" data-move="light">Jab</button>
             <button type="button" class="move-btn" data-move="heavy">Heavy Strike</button>

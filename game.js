@@ -11,6 +11,8 @@ const matchResultText = document.getElementById("matchResultText");
 const rematchButton = document.getElementById("rematchButton");
 const selectButton = document.getElementById("selectButton");
 const moveButtons = Array.from(document.querySelectorAll(".move-btn"));
+const muteButton = document.getElementById("muteButton");
+const aiTellEl = document.getElementById("aiTell");
 
 const W = canvas.width;
 const H = canvas.height;
@@ -30,7 +32,8 @@ arenaBg.addEventListener("load", () => {
 // Painted character sprites (transparent cut-outs from the original key art).
 // nativeSide is the direction the artwork naturally faces (+1 = right, -1 = left)
 // so we know when to mirror it to face the opponent.
-const SPRITE_H = 340;
+const SPRITE_H = 460;
+const VICTORY_SPRITE_H = 630;
 const fighterSprites = {};
 const spriteSources = {
   washington: { src: "assets/sprites/washington.png", nativeSide: 1 },
@@ -89,6 +92,58 @@ Object.entries(altSpriteSources).forEach(([id, moves]) => {
     altFighterSprites[id][move] = entry;
   });
 });
+
+// Sound effects. Each key can point to one or more takes; playSfx picks a
+// random take so repeated jabs/blocks don't sound identical every time, and
+// pools a few clones per clip so overlapping hits (fast turns) don't cut
+// each other off.
+const SFX_SOURCES = {
+  jabSwing: ["assets/sfx/jab-swing.mp3"],
+  heavySwing: ["assets/sfx/heavy-swing.mp3", "assets/sfx/kick-swing.mp3"],
+  jabImpact: ["assets/sfx/jab-impact.mp3", "assets/sfx/jab-impact-alt.mp3"],
+  heavyImpact: ["assets/sfx/heavy-impact.mp3", "assets/sfx/kick-impact.mp3"],
+  swordSlice: ["assets/sfx/sword-slice.mp3", "assets/sfx/sword-slice-alt.mp3", "assets/sfx/sword-slice-heavy.mp3"],
+  hatSpin: ["assets/sfx/hat-spin.mp3", "assets/sfx/hat-spin-alt.mp3"],
+  hitHurt: ["assets/sfx/hit-hurt.mp3", "assets/sfx/hit-hurt-alt.mp3"],
+  block: ["assets/sfx/block-hit.mp3", "assets/sfx/block-hit-alt.mp3"],
+  dodge: ["assets/sfx/dodge-move.mp3"],
+  koFall: ["assets/sfx/ko-fall.mp3"],
+  victory: ["assets/sfx/victory-sting.mp3"],
+};
+const SFX_POOL_SIZE = 3;
+const sfxPools = {};
+Object.entries(SFX_SOURCES).forEach(([key, sources]) => {
+  sfxPools[key] = sources.map((src) => {
+    const pool = [];
+    for (let i = 0; i < SFX_POOL_SIZE; i += 1) {
+      const audio = new Audio(src);
+      audio.preload = "auto";
+      pool.push(audio);
+    }
+    return pool;
+  });
+});
+
+let sfxMuted = false;
+
+function playSfx(key, volume = 1) {
+  if (sfxMuted) return;
+  const takes = sfxPools[key];
+  if (!takes || !takes.length) return;
+  const pool = takes[Math.floor(Math.random() * takes.length)];
+  const audio = pool.find((a) => a.paused || a.ended) || pool[0];
+  audio.volume = volume;
+  audio.currentTime = 0;
+  audio.play().catch(() => {});
+}
+
+function setSfxMuted(muted) {
+  sfxMuted = muted;
+  if (muteButton) {
+    muteButton.textContent = muted ? "Unmute" : "Mute";
+    muteButton.classList.toggle("muted", muted);
+  }
+}
 
 const fighters = [
   {
@@ -201,6 +256,8 @@ function makeFighter(template, x, side, isPlayer) {
     anim: null,
     guarding: false,
     moveThisTurn: null,
+    lastMove: null,
+    pendingIntent: null,
   };
 }
 
@@ -258,6 +315,7 @@ function startRound() {
   hitStopTimer = 0;
   updateSpecialButtonLabel();
   setMenuEnabled(true);
+  prepareAiTurn();
   showBanner(`Round ${match.round}`);
   setTimeout(() => {
     if (state === "fight" && !roundOver) showBanner("Fight!");
@@ -283,13 +341,87 @@ function setMenuEnabled(enabled) {
   });
 }
 
-function chooseAiMove() {
-  if (rival.health < 30 && Math.random() < 0.34) return "block";
-  if (player.meter >= SPECIAL_COST && Math.random() < 0.24) return "block";
-  const roll = Math.random();
-  if (roll > 0.72 && rival.meter >= SPECIAL_COST) return "special";
-  if (roll > 0.43) return "heavy";
+// The AI telegraphs its intent before the player commits a move: computeAiIntent
+// builds weighted odds for each option from the rival's real state (health, meter,
+// last move), tellForIntent turns the dominant weight into a flavor-text hint shown
+// in the UI, and chooseAiMove samples from those same weights so the hint is an
+// honest (if fuzzy) read rather than a red herring.
+function computeAiIntent() {
+  const weights = { light: 28, heavy: 28, special: 0, block: 16 };
+  if (rival.meter >= SPECIAL_COST) weights.special = 24;
+  if (rival.health < 32) {
+    weights.block += 18;
+    weights.light += 6;
+  }
+  if (player.meter >= SPECIAL_COST) weights.block += 10;
+  if (rival.lastMove === "block") {
+    weights.block = Math.max(4, weights.block - 16);
+    weights.heavy += 10;
+  }
+  if (rival.lastMove === "heavy") weights.light += 6;
+  if (rival.lastMove === "light") weights.heavy += 4;
+  return weights;
+}
+
+function sampleFromWeights(weights) {
+  const total = Object.values(weights).reduce((sum, w) => sum + w, 0);
+  let roll = Math.random() * total;
+  for (const [move, w] of Object.entries(weights)) {
+    if (roll < w) return move;
+    roll -= w;
+  }
   return "light";
+}
+
+const AI_TELL_LINES = {
+  light: ["bounces on his toes, looking quick.", "keeps flicking a fast jab in the air."],
+  heavy: ["loads up his weight for something heavy.", "cracks his knuckles, eyeing a big swing."],
+  special: ["'s eyes flick toward his special.", "looks ready to unleash everything."],
+  block: ["tightens up, bracing to cover.", "looks ready to turtle up."],
+};
+
+function tellForIntent(weights) {
+  const top = Object.entries(weights).sort((a, b) => b[1] - a[1])[0][0];
+  const lines = AI_TELL_LINES[top];
+  const line = lines[Math.floor(Math.random() * lines.length)];
+  return line.startsWith("'") ? `${rival.name}${line}` : `${rival.name} ${line}`;
+}
+
+function showAiTell(text) {
+  if (!aiTellEl) return;
+  aiTellEl.textContent = text;
+  aiTellEl.classList.add("show");
+}
+
+function hideAiTell() {
+  if (!aiTellEl) return;
+  aiTellEl.classList.remove("show");
+}
+
+function prepareAiTurn() {
+  if (state !== "fight" || roundOver) return;
+  const weights = computeAiIntent();
+  rival.pendingIntent = weights;
+  showAiTell(tellForIntent(weights));
+}
+
+function chooseAiMove() {
+  const weights = rival.pendingIntent || computeAiIntent();
+  rival.pendingIntent = null;
+  const move = sampleFromWeights(weights);
+  return move === "special" && rival.meter < SPECIAL_COST ? "heavy" : move;
+}
+
+// Turn-resolution matchups: a fast jab beats a winding heavy outright, a heavy
+// crushes through guard for bonus chip damage, and guard parries a jab almost
+// clean. Any other pairing (same move, or anything involving special) resolves
+// with plain damage -- special stays a pure resource-gated wildcard.
+function classifyMatchup(moveA, moveB) {
+  const pair = [moveA, moveB];
+  if (pair.includes("light") && pair.includes("heavy")) return "lightBeatsHeavy";
+  if (pair.includes("heavy") && pair.includes("block")) return "heavyCrushesGuard";
+  if (pair.includes("light") && pair.includes("block")) return "guardParriesLight";
+  return null;
 }
 
 function wait(ms) {
@@ -298,7 +430,9 @@ function wait(ms) {
 
 async function guardBeat(fighter) {
   fighter.guarding = true;
-  fighter.anim = { type: "block", pose: guardPose(fighter), start: performance.now(), duration: 360 };
+  const pose = guardPose(fighter);
+  fighter.anim = { type: "block", pose, start: performance.now(), duration: 360 };
+  playSfx(pose === "jump" ? "dodge" : "block", 0.6);
   await wait(360);
   fighter.anim = null;
 }
@@ -309,15 +443,51 @@ function guardPose(fighter) {
   return "block";
 }
 
-function performAttack(attacker, defender, type) {
+function swingSfxKey(attacker, type) {
+  if (type === "special") return attacker.id === "trump" ? "hatSpin" : "swordSlice";
+  return type === "heavy" ? "heavySwing" : "jabSwing";
+}
+
+function impactSfxKey(attacker, type) {
+  if (type === "special") return attacker.id === "trump" ? "hatSpin" : "swordSlice";
+  return type === "heavy" ? "heavyImpact" : "jabImpact";
+}
+
+function performAttack(attacker, defender, type, matchup) {
   const data = moveData(attacker, type);
   attacker.anim = { type, pose: data.pose || type, start: performance.now(), duration: data.duration * 1000 };
+  playSfx(swingSfxKey(attacker, type), 0.75);
   return new Promise((resolve) => {
     setTimeout(() => {
       const blocked = defender.moveThisTurn === "block";
-      const dmg = data.damage * attacker.stats.power * (blocked ? data.blockScale : 1);
+      let blockScale = data.blockScale;
+      let dmgMult = 1;
+      let counterMeterBonus = 0;
+      let forcedText = null;
+
+      if (matchup === "lightBeatsHeavy" && type === "light") {
+        dmgMult = 1.35;
+        forcedText = "COUNTER!";
+      }
+      if (matchup === "heavyCrushesGuard" && blocked) {
+        blockScale += 0.1;
+        counterMeterBonus = 6;
+        forcedText = "GUARD CRUSHED!";
+      }
+      if (matchup === "guardParriesLight" && blocked) {
+        blockScale = Math.max(0.02, blockScale - 0.14);
+        forcedText = "PARRIED!";
+      }
+
+      const dmg = data.damage * attacker.stats.power * (blocked ? blockScale : 1) * dmgMult;
       const lethal = defender.health - dmg <= 0;
       defender.health = Math.max(0, defender.health - dmg);
+      if (blocked) playSfx("block", 0.7);
+      else {
+        playSfx(impactSfxKey(attacker, type), 0.85);
+        playSfx("hitHurt", 0.5);
+      }
+      if (lethal) playSfx("koFall", 0.8);
       defender.hitFlash = 1;
       defender.knockback = blocked ? 10 : type === "special" ? 40 : type === "heavy" ? 32 : 26;
       attacker.meter = Math.min(100, attacker.meter + data.gain);
@@ -327,12 +497,13 @@ function performAttack(attacker, defender, type) {
         const guardBonus = defender.trait.guardMeterBonus || 0;
         const heavyBonus = type === "heavy" ? defender.trait.blockedHeavyMeterBonus || 0 : 0;
         defender.meter = Math.min(100, defender.meter + data.blockMeter + guardBonus + heavyBonus);
+        attacker.meter = Math.min(100, attacker.meter + counterMeterBonus);
       }
 
-      const bigHit = !blocked && (type === "heavy" || type === "special");
-      cameraShake = blocked ? 5 : type === "special" ? 22 : type === "heavy" ? 15 : 9;
+      const bigHit = !blocked && (type === "heavy" || type === "special" || forcedText === "COUNTER!");
+      cameraShake = blocked ? (forcedText === "GUARD CRUSHED!" ? 9 : 5) : forcedText === "COUNTER!" ? 18 : type === "special" ? 22 : type === "heavy" ? 15 : 9;
       if (bigHit) screenFlash = type === "special" ? 0.55 : 0.35;
-      hitStopTimer = blocked ? 0 : type === "special" ? 130 : type === "heavy" ? 85 : 0;
+      hitStopTimer = blocked ? 0 : forcedText === "COUNTER!" ? 90 : type === "special" ? 130 : type === "heavy" ? 85 : 0;
 
       hitSparks.push({
         x: defender.x - defender.side * 72,
@@ -347,8 +518,8 @@ function performAttack(attacker, defender, type) {
           x: defender.x - defender.side * 40,
           y: defender.y - 260,
           age: 0,
-          text: type === "special" ? "CRITICAL!" : "BIG HIT!",
-          color: type === "special" ? "#ff404e" : "#ffb932",
+          text: forcedText || (type === "special" ? "CRITICAL!" : "BIG HIT!"),
+          color: forcedText === "COUNTER!" ? "#42e66c" : type === "special" ? "#ff404e" : "#ffb932",
         });
       }
       if (blocked) {
@@ -356,8 +527,8 @@ function performAttack(attacker, defender, type) {
           x: defender.x - defender.side * 36,
           y: defender.y - 245,
           age: 0,
-          text: "BLOCKED!",
-          color: "#20d6ff",
+          text: forcedText || "BLOCKED!",
+          color: forcedText === "GUARD CRUSHED!" ? "#ff8b2a" : forcedText === "PARRIED!" ? "#42e66c" : "#20d6ff",
         });
       }
       if (lethal) {
@@ -380,10 +551,39 @@ function performAttack(attacker, defender, type) {
   });
 }
 
+// A jab that catches an opponent mid-heavy-windup stops their swing outright:
+// the heavy attacker whiffs, staggers, and eats a small meter penalty instead
+// of dealing any damage.
+function performInterrupted(attacker) {
+  attacker.anim = { type: attacker.moveThisTurn, pose: attacker.moveThisTurn, start: performance.now(), duration: 260 };
+  playSfx(swingSfxKey(attacker, attacker.moveThisTurn), 0.5);
+  return new Promise((resolve) => {
+    setTimeout(() => {
+      attacker.hitFlash = 0.6;
+      attacker.knockback = 16;
+      attacker.meter = Math.max(0, attacker.meter - 6);
+      playSfx("hitHurt", 0.35);
+      cameraShake = Math.max(cameraShake, 10);
+      impactTexts.push({
+        x: attacker.x - attacker.side * 40,
+        y: attacker.y - 260,
+        age: 0,
+        text: "STAGGERED!",
+        color: "#ff8b2a",
+      });
+    }, 180);
+    setTimeout(() => {
+      attacker.anim = null;
+      resolve();
+    }, 420);
+  });
+}
+
 async function runTurn(playerMove) {
   if (turnLocked || roundOver || state !== "fight") return;
   if (playerMove === "special" && player.meter < SPECIAL_COST) return;
 
+  hideAiTell();
   turnLocked = true;
   setMenuEnabled(false);
 
@@ -395,7 +595,13 @@ async function runTurn(playerMove) {
   queueTurnCallouts(playerMove, rivalMove);
   await wait(260);
 
-  const actors = [player, rival].sort((a, b) => b.stats.speed - a.stats.speed);
+  const matchup = classifyMatchup(playerMove, rivalMove);
+  let actors = [player, rival].sort((a, b) => b.stats.speed - a.stats.speed);
+  let interrupted = null;
+  if (matchup === "lightBeatsHeavy") {
+    interrupted = player.moveThisTurn === "heavy" ? player : rival;
+    actors = actors.slice().sort((a, b) => (a.moveThisTurn === "light" ? 0 : 1) - (b.moveThisTurn === "light" ? 0 : 1));
+  }
 
   for (const actor of actors) {
     if (actor.health <= 0) continue;
@@ -404,10 +610,15 @@ async function runTurn(playerMove) {
       await guardBeat(actor);
       continue;
     }
-    await performAttack(actor, defender, actor.moveThisTurn);
+    if (actor === interrupted) {
+      await performInterrupted(actor);
+      continue;
+    }
+    await performAttack(actor, defender, actor.moveThisTurn, matchup);
     if (defender.health <= 0) break;
   }
 
+  rival.lastMove = rival.moveThisTurn;
   player.guarding = false;
   rival.guarding = false;
   player.moveThisTurn = null;
@@ -422,6 +633,7 @@ async function runTurn(playerMove) {
 
   turnLocked = false;
   setMenuEnabled(true);
+  prepareAiTurn();
 }
 
 function queueTurnCallouts(playerMove, rivalMove) {
@@ -632,7 +844,7 @@ function drawFighterSprite(f, sprite, opponent) {
   const activeSprite = alt && alt.ready ? alt : sprite;
   const isVictory = poseKey === "victory" && activeSprite === alt;
   const img = activeSprite.img;
-  const h = SPRITE_H * (activeSprite.scale || 1) * (isVictory ? 1.85 : 1);
+  const h = isVictory ? VICTORY_SPRITE_H : SPRITE_H * (activeSprite.scale || 1);
   const w = (img.width * h) / img.height;
   const bob = isVictory ? 0 : Math.sin(f.bob) * 3;
 
@@ -1028,6 +1240,7 @@ function endRound(winner) {
   if (roundOver) return;
   roundOver = true;
   setMenuEnabled(false);
+  hideAiTell();
   if (winner === player) match.playerWins += 1;
   else match.rivalWins += 1;
 
@@ -1038,6 +1251,7 @@ function endRound(winner) {
   koAnimStart = performance.now();
   koBannerText = matchWinner ? (winner === player ? "YOU WIN" : "MATCH LOST") : `${winner.name} Wins`;
   showBanner(matchWinner ? `${winner.name} Takes Match` : `${winner.name} Wins Round`);
+  playSfx("victory", 0.8);
 
   if (matchWinner) {
     match.complete = true;
@@ -1068,6 +1282,7 @@ function returnToSelect() {
   roundOver = false;
   turnLocked = false;
   match = null;
+  hideAiTell();
 }
 
 function draw() {
@@ -1146,5 +1361,6 @@ window.addEventListener("keydown", (event) => {
 startButton.addEventListener("click", startMatch);
 rematchButton.addEventListener("click", startMatch);
 selectButton.addEventListener("click", returnToSelect);
+if (muteButton) muteButton.addEventListener("click", () => setSfxMuted(!sfxMuted));
 buildRoster();
 requestAnimationFrame(loop);

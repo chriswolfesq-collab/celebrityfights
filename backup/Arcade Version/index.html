@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Presidential Fight Night</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Bangers&family=Inter:wght@500;700;900&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="game-shell">
+      <section class="arena-wrap" aria-label="Celebrity Clash Arcade game">
+        <canvas id="game" width="1280" height="720"></canvas>
+
+        <div id="selectScreen" class="select-screen">
+          <div class="title-stack">
+            <span class="kicker">Cinematic celebrity combat prototype</span>
+            <h1>Presidential Fight Night</h1>
+          </div>
+          <div class="roster" id="roster"></div>
+          <button id="startButton" class="start-button" type="button">Start Match</button>
+        </div>
+
+        <div id="roundBanner" class="round-banner">Round 1</div>
+      </section>
+
+      <section class="controls">
+        <div>
+          <strong>Move</strong>
+          <span>A / D</span>
+        </div>
+        <div>
+          <strong>Jump</strong>
+          <span>W</span>
+        </div>
+        <div>
+          <strong>Block</strong>
+          <span>S</span>
+        </div>
+        <div>
+          <strong>Light</strong>
+          <span>J</span>
+        </div>
+        <div>
+          <strong>Heavy</strong>
+          <span>K</span>
+        </div>
+        <div>
+          <strong>Special</strong>
+          <span>L</span>
+        </div>
+        <div>
+          <strong>Pause</strong>
+          <span>P</span>
+        </div>
+      </section>
+    </main>
+
+    <script src="game.js"></script>
+  </body>
+</html>

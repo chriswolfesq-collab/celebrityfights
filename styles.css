@@ -1,0 +1,302 @@
+:root {
+  --panel: #101820;
+  --panel-2: #1f2933;
+  --ink: #f7f2dc;
+  --neon: #ffe04d;
+  --hot: #ff404e;
+  --cyan: #20d6ff;
+  --green: #42e66c;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  min-height: 100vh;
+  margin: 0;
+  display: grid;
+  place-items: center;
+  overflow-x: hidden;
+  color: var(--ink);
+  font-family: Inter, system-ui, sans-serif;
+  background:
+    radial-gradient(circle at 50% 0%, rgba(255, 224, 77, 0.22), transparent 34rem),
+    linear-gradient(135deg, #151922 0%, #26313a 38%, #391d2c 72%, #141a22 100%);
+}
+
+.game-shell {
+  width: min(100vw, 1360px);
+  padding: clamp(10px, 2vw, 24px);
+}
+
+.arena-wrap {
+  position: relative;
+  overflow: hidden;
+  aspect-ratio: 16 / 9;
+  width: 100%;
+  border: 4px solid #0d1117;
+  border-radius: 8px;
+  box-shadow:
+    0 0 0 2px rgba(255, 255, 255, 0.18) inset,
+    0 28px 70px rgba(0, 0, 0, 0.48);
+  background: #111820;
+}
+
+canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  image-rendering: auto;
+}
+
+.select-screen {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  gap: clamp(12px, 2vw, 22px);
+  padding: clamp(18px, 4vw, 42px);
+  background:
+    linear-gradient(rgba(9, 14, 20, 0.72), rgba(9, 14, 20, 0.58)),
+    repeating-linear-gradient(0deg, rgba(255, 255, 255, 0.04) 0 2px, transparent 2px 7px);
+}
+
+.select-screen.hidden {
+  display: none;
+}
+
+.title-stack {
+  text-align: center;
+  text-shadow: 0 4px 0 #0a0c10, 0 0 24px rgba(255, 64, 78, 0.65);
+}
+
+.kicker {
+  color: var(--cyan);
+  font-size: clamp(0.78rem, 1.5vw, 1rem);
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+h1 {
+  margin: 4px 0 0;
+  font-family: Bangers, Impact, sans-serif;
+  font-size: clamp(3rem, 8vw, 7.8rem);
+  font-weight: 400;
+  letter-spacing: 0;
+  line-height: 0.86;
+  color: var(--neon);
+  -webkit-text-stroke: 2px #0c1118;
+}
+
+.roster {
+  align-self: center;
+  justify-self: center;
+  width: min(760px, 100%);
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: clamp(8px, 1.4vw, 18px);
+}
+
+.fighter-card {
+  min-width: 0;
+  min-height: 160px;
+  display: grid;
+  align-content: end;
+  gap: 8px;
+  padding: clamp(10px, 1.6vw, 16px);
+  color: white;
+  text-align: left;
+  border: 3px solid rgba(255, 255, 255, 0.38);
+  border-radius: 8px;
+  background:
+    linear-gradient(180deg, transparent 0%, rgba(0, 0, 0, 0.64) 70%),
+    var(--card-color);
+  box-shadow: 0 12px 0 rgba(0, 0, 0, 0.35);
+  cursor: pointer;
+}
+
+.fighter-card.selected {
+  border-color: var(--neon);
+  box-shadow: 0 0 0 4px rgba(255, 224, 77, 0.26), 0 12px 0 rgba(0, 0, 0, 0.42);
+}
+
+.portrait {
+  align-self: start;
+  justify-self: center;
+  width: min(92px, 18vw);
+  height: min(92px, 18vw);
+  border-radius: 50%;
+  background:
+    radial-gradient(circle at 50% 28%, #ffd0a1 0 23%, transparent 24%),
+    radial-gradient(circle at 50% 40%, var(--hair) 0 36%, transparent 37%),
+    linear-gradient(var(--outfit), var(--outfit));
+  border: 3px solid rgba(255, 255, 255, 0.72);
+}
+
+.fighter-card strong {
+  overflow-wrap: anywhere;
+  font-family: Bangers, Impact, sans-serif;
+  font-size: clamp(1.45rem, 2.5vw, 2.55rem);
+  font-weight: 400;
+  line-height: 0.9;
+  text-shadow: 0 3px 0 #071019;
+}
+
+.fighter-card span {
+  font-size: clamp(0.72rem, 1.3vw, 0.92rem);
+  font-weight: 900;
+  color: #fceec3;
+  text-transform: uppercase;
+}
+
+.start-button {
+  justify-self: center;
+  min-width: min(360px, 92%);
+  padding: 15px 24px 17px;
+  color: #12151a;
+  font-family: Bangers, Impact, sans-serif;
+  font-size: clamp(2rem, 4vw, 3.8rem);
+  letter-spacing: 0;
+  border: 0;
+  border-radius: 8px;
+  background: linear-gradient(#fff4a8, #ffbd2d 48%, #ff6936);
+  box-shadow: 0 8px 0 #7d281b, 0 16px 30px rgba(0, 0, 0, 0.34);
+  cursor: pointer;
+}
+
+.round-banner {
+  position: absolute;
+  top: 40%;
+  left: 50%;
+  transform: translate(-50%, -50%) scale(0.88);
+  opacity: 0;
+  pointer-events: none;
+  color: white;
+  font-family: Bangers, Impact, sans-serif;
+  font-size: clamp(4rem, 11vw, 9rem);
+  letter-spacing: 0;
+  text-shadow: 0 6px 0 #080a0e, 0 0 30px var(--hot);
+  transition: opacity 180ms ease, transform 180ms ease;
+}
+
+.round-banner.show {
+  opacity: 1;
+  transform: translate(-50%, -50%) scale(1);
+}
+
+.battle-ui.hidden {
+  display: none;
+}
+
+.battle-ui {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  justify-content: center;
+  padding: clamp(8px, 1.6vw, 16px);
+  background: linear-gradient(0deg, rgba(9, 12, 16, 0.92) 0%, rgba(9, 12, 16, 0.55) 78%, transparent 100%);
+}
+
+.action-menu {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: clamp(6px, 1vw, 10px);
+  width: min(100%, 640px);
+}
+
+.move-btn {
+  min-width: 0;
+  padding: clamp(8px, 1.6vw, 14px) clamp(6px, 1vw, 10px);
+  color: #12151a;
+  font-family: Bangers, Impact, sans-serif;
+  font-size: clamp(0.95rem, 2vw, 1.5rem);
+  letter-spacing: 0.02em;
+  border: 0;
+  border-radius: 8px;
+  background: linear-gradient(#f7f2dc, #d8cfa9);
+  box-shadow: 0 5px 0 #7a7154, 0 10px 18px rgba(0, 0, 0, 0.3);
+  cursor: pointer;
+}
+
+.move-btn.special {
+  background: linear-gradient(#8de8ff, #20a7e0);
+  box-shadow: 0 5px 0 #12556e, 0 10px 18px rgba(0, 0, 0, 0.3);
+}
+
+.move-btn.block {
+  background: linear-gradient(#ffd27a, #ff9a2d);
+  box-shadow: 0 5px 0 #7d4a13, 0 10px 18px rgba(0, 0, 0, 0.3);
+}
+
+.move-btn:disabled {
+  color: #6b7280;
+  background: linear-gradient(#3a4048, #262b31);
+  box-shadow: 0 5px 0 #14171b, 0 10px 18px rgba(0, 0, 0, 0.3);
+  cursor: not-allowed;
+}
+
+.move-btn:not(:disabled):active {
+  transform: translateY(3px);
+  box-shadow: 0 2px 0 #7a7154, 0 6px 12px rgba(0, 0, 0, 0.3);
+}
+
+.controls {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.controls div {
+  min-width: 0;
+  padding: 9px 10px;
+  border: 2px solid rgba(255, 255, 255, 0.13);
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.36);
+}
+
+.controls strong,
+.controls span {
+  display: block;
+  white-space: nowrap;
+}
+
+.controls strong {
+  color: var(--neon);
+  font-size: 0.74rem;
+  text-transform: uppercase;
+}
+
+.controls span {
+  margin-top: 2px;
+  font-size: clamp(0.82rem, 1.4vw, 1rem);
+  font-weight: 900;
+}
+
+@media (max-width: 760px) {
+  body {
+    place-items: start center;
+  }
+
+  .arena-wrap {
+    aspect-ratio: auto;
+    height: min(72vh, 580px);
+    min-height: 520px;
+  }
+
+  .roster {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .fighter-card {
+    min-height: 132px;
+  }
+
+  .controls {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}

@@ -93,7 +93,7 @@ h1 {
 .roster {
   align-self: center;
   justify-self: center;
-  width: min(760px, 100%);
+  width: min(880px, 100%);
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: clamp(8px, 1.4vw, 18px);
@@ -101,10 +101,10 @@ h1 {
 
 .fighter-card {
   min-width: 0;
-  min-height: 160px;
+  min-height: 250px;
   display: grid;
-  align-content: end;
-  gap: 8px;
+  grid-template-rows: minmax(104px, 1fr) auto auto auto auto;
+  gap: 7px;
   padding: clamp(10px, 1.6vw, 16px);
   color: white;
   text-align: left;
@@ -123,16 +123,50 @@ h1 {
 }
 
 .portrait {
-  align-self: start;
+  display: block;
+  min-width: 0;
   justify-self: center;
-  width: min(92px, 18vw);
-  height: min(92px, 18vw);
-  border-radius: 50%;
-  background:
-    radial-gradient(circle at 50% 28%, #ffd0a1 0 23%, transparent 24%),
-    radial-gradient(circle at 50% 40%, var(--hair) 0 36%, transparent 37%),
-    linear-gradient(var(--outfit), var(--outfit));
-  border: 3px solid rgba(255, 255, 255, 0.72);
+  width: min(170px, 34vw);
+  height: clamp(96px, 18vw, 142px);
+  object-fit: contain;
+  object-position: center bottom;
+  filter: drop-shadow(0 10px 8px rgba(0, 0, 0, 0.48));
+}
+
+.fighter-card.selected .portrait {
+  transform: translateY(-3px) scale(1.04);
+}
+
+.trait {
+  min-height: 31px;
+  padding: 6px 8px;
+  color: #101820;
+  font-size: clamp(0.68rem, 1vw, 0.82rem);
+  font-style: normal;
+  font-weight: 900;
+  line-height: 1.16;
+  text-transform: uppercase;
+  border-radius: 6px;
+  background: rgba(255, 224, 77, 0.88);
+}
+
+.stats {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.stats b {
+  min-width: 0;
+  padding: 5px 7px;
+  color: #f7f2dc;
+  font-size: clamp(0.66rem, 1vw, 0.78rem);
+  line-height: 1;
+  text-align: center;
+  text-transform: uppercase;
+  border: 2px solid rgba(255, 255, 255, 0.28);
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.34);
 }
 
 .fighter-card strong {
@@ -166,6 +200,18 @@ h1 {
   cursor: pointer;
 }
 
+.start-button.compact {
+  min-width: 0;
+  padding: 10px 18px 12px;
+  font-size: clamp(1.55rem, 3vw, 2.7rem);
+}
+
+.start-button.secondary {
+  color: var(--ink);
+  background: linear-gradient(#32404b, #17212a);
+  box-shadow: 0 8px 0 #0b1016, 0 16px 30px rgba(0, 0, 0, 0.34);
+}
+
 .round-banner {
   position: absolute;
   top: 40%;
@@ -179,6 +225,56 @@ h1 {
   letter-spacing: 0;
   text-shadow: 0 6px 0 #080a0e, 0 0 30px var(--hot);
   transition: opacity 180ms ease, transform 180ms ease;
+}
+
+.match-end-screen {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: clamp(16px, 4vw, 42px);
+  background:
+    linear-gradient(rgba(9, 14, 20, 0.58), rgba(9, 14, 20, 0.78)),
+    repeating-linear-gradient(0deg, rgba(255, 255, 255, 0.035) 0 2px, transparent 2px 7px);
+}
+
+.match-end-screen.hidden {
+  display: none;
+}
+
+.match-end-panel {
+  width: min(640px, 100%);
+  padding: clamp(18px, 3vw, 30px);
+  text-align: center;
+  border: 3px solid rgba(255, 255, 255, 0.3);
+  border-radius: 8px;
+  background: rgba(8, 13, 19, 0.86);
+  box-shadow: 0 18px 0 rgba(0, 0, 0, 0.4);
+}
+
+.match-end-panel h2 {
+  margin: 6px 0 8px;
+  color: var(--neon);
+  font-family: Bangers, Impact, sans-serif;
+  font-size: clamp(3rem, 8vw, 6.2rem);
+  font-weight: 400;
+  line-height: 0.9;
+  text-shadow: 0 4px 0 #0a0c10;
+  -webkit-text-stroke: 2px #0c1118;
+}
+
+.match-end-panel p {
+  margin: 0 0 18px;
+  color: #fceec3;
+  font-size: clamp(0.9rem, 1.6vw, 1.08rem);
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.match-end-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
 }
 
 .round-banner.show {
@@ -246,7 +342,7 @@ h1 {
 
 .controls {
   display: grid;
-  grid-template-columns: repeat(7, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 8px;
   margin-top: 10px;
 }
@@ -293,7 +389,20 @@ h1 {
   }
 
   .fighter-card {
-    min-height: 132px;
+    min-height: 226px;
+  }
+
+  .portrait {
+    width: min(132px, 32vw);
+    height: 106px;
+  }
+
+  .trait {
+    min-height: 42px;
+  }
+
+  .match-end-actions {
+    grid-template-columns: 1fr;
   }
 
   .controls {

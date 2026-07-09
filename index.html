@@ -26,11 +26,23 @@
         <div id="roundBanner" class="round-banner">Round 1</div>
 
         <div id="battleUI" class="battle-ui hidden">
-          <div id="actionMenu" class="action-menu">
+          <div class="action-menu">
             <button type="button" class="move-btn" data-move="light">Jab</button>
             <button type="button" class="move-btn" data-move="heavy">Heavy Strike</button>
             <button type="button" class="move-btn special" data-move="special">Special</button>
             <button type="button" class="move-btn block" data-move="block">Guard</button>
+          </div>
+        </div>
+
+        <div id="matchEndScreen" class="match-end-screen hidden">
+          <div class="match-end-panel">
+            <span id="matchResultKicker" class="kicker">Best of 3 complete</span>
+            <h2 id="matchResultTitle">Match Over</h2>
+            <p id="matchResultText"></p>
+            <div class="match-end-actions">
+              <button id="rematchButton" class="start-button compact" type="button">Rematch</button>
+              <button id="selectButton" class="start-button compact secondary" type="button">Select Fighter</button>
+            </div>
           </div>
         </div>
       </section>
@@ -55,6 +67,6 @@
       </section>
     </main>
 
-    <script src="game.js"></script>
+    <script src="game.js?v=2"></script>
   </body>
 </html>

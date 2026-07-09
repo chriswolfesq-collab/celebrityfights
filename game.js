@@ -5,7 +5,11 @@ const rosterEl = document.getElementById("roster");
 const startButton = document.getElementById("startButton");
 const roundBanner = document.getElementById("roundBanner");
 const battleUI = document.getElementById("battleUI");
-const actionMenu = document.getElementById("actionMenu");
+const matchEndScreen = document.getElementById("matchEndScreen");
+const matchResultTitle = document.getElementById("matchResultTitle");
+const matchResultText = document.getElementById("matchResultText");
+const rematchButton = document.getElementById("rematchButton");
+const selectButton = document.getElementById("selectButton");
 const moveButtons = Array.from(document.querySelectorAll(".move-btn"));
 
 const W = canvas.width;
@@ -52,6 +56,8 @@ const altSpriteSources = {
     light: { src: "assets/sprites/washington-punch.png", nativeSide: 1 },
     heavy: { src: "assets/sprites/washington-kick.png", nativeSide: 1 },
     special: { src: "assets/sprites/washington-swordlunge.png", nativeSide: 1, scale: 0.82 },
+    specialAlt: { src: "assets/sprites/washington-swordswing.png", nativeSide: 1, scale: 0.9 },
+    jump: { src: "assets/sprites/washington-jump.png", nativeSide: 1 },
     block: { src: "assets/sprites/washington-duck.png", nativeSide: 1, scale: 0.72 },
     hit: { src: "assets/sprites/washington-takinghit.png", nativeSide: 1 },
     celebration: { src: "assets/sprites/washington-celebration.png", nativeSide: 1 },
@@ -61,9 +67,12 @@ const altSpriteSources = {
     light: { src: "assets/sprites/trump-punch.png", nativeSide: -1 },
     heavy: { src: "assets/sprites/trump-kick.png", nativeSide: -1 },
     special: { src: "assets/sprites/trump-hatswing.png", nativeSide: -1 },
+    jump: { src: "assets/sprites/trump-jump.png", nativeSide: -1 },
     block: { src: "assets/sprites/trump-block.png", nativeSide: -1 },
+    blockAlt: { src: "assets/sprites/trump-block-alt.png", nativeSide: -1 },
     hit: { src: "assets/sprites/trump-takinghit.png", nativeSide: -1 },
     celebration: { src: "assets/sprites/trump-celebration.png", nativeSide: -1 },
+    taunt: { src: "assets/sprites/trump-dance.png", nativeSide: -1 },
     victory: { src: "assets/sprites/trump-victory-washington.png", nativeSide: -1, vs: "washington" },
   },
 };
@@ -92,7 +101,14 @@ const fighters = [
     outfit: "#263247",
     accent: "#c9b078",
     special: "Valley Forge Slash",
+    portrait: "assets/sprites/washington.png",
     stats: { speed: 4.7, power: 1.14 },
+    trait: {
+      name: "Steady Resolve",
+      description: "Guard earns extra meter. Specials pierce guard harder.",
+      guardMeterBonus: 6,
+      specialPierceBonus: 0.14,
+    },
   },
   {
     id: "trump",
@@ -104,16 +120,26 @@ const fighters = [
     outfit: "#242936",
     accent: "#f4f1e8",
     special: "Rally Counter",
+    portrait: "assets/sprites/trump.png",
     stats: { speed: 4.6, power: 1.18 },
+    trait: {
+      name: "Counterpuncher",
+      description: "Heavy strikes hit harder. Guard sets up extra meter.",
+      heavyDamageBonus: 0.12,
+      guardMeterBonus: 3,
+      blockedHeavyMeterBonus: 5,
+    },
   },
 ];
 
 const MOVE_LABELS = {
   light: "Jab",
   heavy: "Heavy Strike",
-  special: null, // filled in per-fighter with their special name
   block: "Guard",
 };
+
+const SPECIAL_COST = 35;
+const MATCH_WINS = 2;
 
 let selectedId = fighters[0].id;
 let player;
@@ -121,20 +147,39 @@ let rival;
 let cameraShake = 0;
 let hitSparks = [];
 let impactTexts = [];
+let turnCallouts = [];
 let screenFlash = 0;
 let hitStopTimer = 0;
 let koAnimStart = 0;
+let koBannerText = "K.O.";
 let state = "select";
 let turnLocked = false;
 let roundOver = false;
+let match;
 let lastTick = performance.now();
 
-function moveData(type) {
-  return {
-    light: { damage: 9, duration: 0.5, activeAt: 0.52, gain: 12, label: "Jab" },
-    heavy: { damage: 16, duration: 0.62, activeAt: 0.56, gain: 16, label: "Heavy Strike" },
-    special: { damage: 24, duration: 0.75, activeAt: 0.6, gain: 0, label: null },
-  }[type];
+function moveData(attacker, type) {
+  const moves = {
+    light: { damage: 8, duration: 0.5, activeAt: 0.52, gain: 16, blockScale: 0.18, blockMeter: 9, label: "Jab" },
+    heavy: { damage: 17, duration: 0.62, activeAt: 0.56, gain: 11, blockScale: 0.08, blockMeter: 14, label: "Heavy Strike" },
+    special: {
+      damage: 25,
+      duration: 0.75,
+      activeAt: 0.6,
+      gain: 0,
+      blockScale: 0.44 + (attacker.trait.specialPierceBonus || 0),
+      blockMeter: 7,
+      label: attacker.special,
+      pose: attacker.id === "washington" && attacker.meter >= 70 ? "specialAlt" : "special",
+    },
+  };
+  const data = { ...moves[type] };
+  if (type === "heavy") data.damage *= 1 + (attacker.trait.heavyDamageBonus || 0);
+  return data;
+}
+
+function moveLabel(fighter, move) {
+  return move === "special" ? fighter.special : MOVE_LABELS[move];
 }
 
 function makeFighter(template, x, side, isPlayer) {
@@ -152,6 +197,7 @@ function makeFighter(template, x, side, isPlayer) {
     hitFlash: 0,
     knockback: 0,
     won: false,
+    winPose: null,
     anim: null,
     guarding: false,
     moveThisTurn: null,
@@ -165,9 +211,13 @@ function buildRoster() {
     card.type = "button";
     card.className = `fighter-card ${fighter.id === selectedId ? "selected" : ""}`;
     card.style.setProperty("--card-color", fighter.card);
-    card.style.setProperty("--hair", fighter.hair);
-    card.style.setProperty("--outfit", fighter.outfit);
-    card.innerHTML = `<i class="portrait" aria-hidden="true"></i><strong>${fighter.name}</strong><span>${fighter.tag}</span>`;
+    card.innerHTML = `
+      <img class="portrait" src="${fighter.portrait}" alt="" />
+      <strong>${fighter.name}</strong>
+      <span>${fighter.tag}</span>
+      <em class="trait">${fighter.trait.description}</em>
+      <span class="stats"><b>SPD ${fighter.stats.speed.toFixed(1)}</b><b>PWR ${fighter.stats.power.toFixed(2)}</b></span>
+    `;
     card.addEventListener("click", () => {
       selectedId = fighter.id;
       buildRoster();
@@ -180,17 +230,38 @@ function startMatch() {
   const chosen = fighters.find((fighter) => fighter.id === selectedId);
   const opponent = chosen.id === "trump" ? fighters[0] : fighters[1];
   window.scrollTo({ top: 0, behavior: "auto" });
-  player = makeFighter(chosen, leftX, 1, true);
-  rival = makeFighter(opponent, rightX, -1, false);
+  match = {
+    playerTemplate: chosen,
+    rivalTemplate: opponent,
+    playerWins: 0,
+    rivalWins: 0,
+    round: 1,
+    complete: false,
+  };
   state = "fight";
-  roundOver = false;
-  turnLocked = false;
-  updateSpecialButtonLabel();
-  setMenuEnabled(true);
+  matchEndScreen.classList.add("hidden");
   selectScreen.classList.add("hidden");
   battleUI.classList.remove("hidden");
-  showBanner("Round 1");
-  setTimeout(() => showBanner("Fight!"), 900);
+  startRound();
+}
+
+function startRound() {
+  player = makeFighter(match.playerTemplate, leftX, 1, true);
+  rival = makeFighter(match.rivalTemplate, rightX, -1, false);
+  roundOver = false;
+  turnLocked = false;
+  cameraShake = 0;
+  hitSparks = [];
+  impactTexts = [];
+  turnCallouts = [];
+  screenFlash = 0;
+  hitStopTimer = 0;
+  updateSpecialButtonLabel();
+  setMenuEnabled(true);
+  showBanner(`Round ${match.round}`);
+  setTimeout(() => {
+    if (state === "fight" && !roundOver) showBanner("Fight!");
+  }, 900);
 }
 
 function updateSpecialButtonLabel() {
@@ -207,16 +278,17 @@ function showBanner(text) {
 function setMenuEnabled(enabled) {
   moveButtons.forEach((btn) => {
     const isSpecial = btn.dataset.move === "special";
-    const specialLocked = isSpecial && player && player.meter < 35;
+    const specialLocked = isSpecial && player && player.meter < SPECIAL_COST;
     btn.disabled = !enabled || specialLocked;
   });
 }
 
 function chooseAiMove() {
-  if (rival.health < 30 && Math.random() < 0.32) return "block";
+  if (rival.health < 30 && Math.random() < 0.34) return "block";
+  if (player.meter >= SPECIAL_COST && Math.random() < 0.24) return "block";
   const roll = Math.random();
-  if (roll > 0.72 && rival.meter >= 35) return "special";
-  if (roll > 0.42) return "heavy";
+  if (roll > 0.72 && rival.meter >= SPECIAL_COST) return "special";
+  if (roll > 0.43) return "heavy";
   return "light";
 }
 
@@ -226,22 +298,36 @@ function wait(ms) {
 
 async function guardBeat(fighter) {
   fighter.guarding = true;
+  fighter.anim = { type: "block", pose: guardPose(fighter), start: performance.now(), duration: 360 };
   await wait(360);
+  fighter.anim = null;
+}
+
+function guardPose(fighter) {
+  if (fighter.health < 38 && Math.random() < 0.28) return "jump";
+  if (fighter.id === "trump" && Math.random() < 0.5) return "blockAlt";
+  return "block";
 }
 
 function performAttack(attacker, defender, type) {
-  const data = moveData(type);
-  attacker.anim = { type, start: performance.now(), duration: data.duration * 1000 };
+  const data = moveData(attacker, type);
+  attacker.anim = { type, pose: data.pose || type, start: performance.now(), duration: data.duration * 1000 };
   return new Promise((resolve) => {
     setTimeout(() => {
       const blocked = defender.moveThisTurn === "block";
-      const dmg = data.damage * attacker.stats.power * (blocked ? 0.28 : 1);
-      const lethal = !blocked && defender.health - dmg <= 0;
+      const dmg = data.damage * attacker.stats.power * (blocked ? data.blockScale : 1);
+      const lethal = defender.health - dmg <= 0;
       defender.health = Math.max(0, defender.health - dmg);
       defender.hitFlash = 1;
       defender.knockback = blocked ? 10 : type === "special" ? 40 : type === "heavy" ? 32 : 26;
       attacker.meter = Math.min(100, attacker.meter + data.gain);
-      if (type === "special") attacker.meter = Math.max(0, attacker.meter - 35);
+      if (type === "special") attacker.meter = Math.max(0, attacker.meter - SPECIAL_COST);
+
+      if (blocked) {
+        const guardBonus = defender.trait.guardMeterBonus || 0;
+        const heavyBonus = type === "heavy" ? defender.trait.blockedHeavyMeterBonus || 0 : 0;
+        defender.meter = Math.min(100, defender.meter + data.blockMeter + guardBonus + heavyBonus);
+      }
 
       const bigHit = !blocked && (type === "heavy" || type === "special");
       cameraShake = blocked ? 5 : type === "special" ? 22 : type === "heavy" ? 15 : 9;
@@ -263,6 +349,15 @@ function performAttack(attacker, defender, type) {
           age: 0,
           text: type === "special" ? "CRITICAL!" : "BIG HIT!",
           color: type === "special" ? "#ff404e" : "#ffb932",
+        });
+      }
+      if (blocked) {
+        impactTexts.push({
+          x: defender.x - defender.side * 36,
+          y: defender.y - 245,
+          age: 0,
+          text: "BLOCKED!",
+          color: "#20d6ff",
         });
       }
       if (lethal) {
@@ -287,7 +382,7 @@ function performAttack(attacker, defender, type) {
 
 async function runTurn(playerMove) {
   if (turnLocked || roundOver || state !== "fight") return;
-  if (playerMove === "special" && player.meter < 35) return;
+  if (playerMove === "special" && player.meter < SPECIAL_COST) return;
 
   turnLocked = true;
   setMenuEnabled(false);
@@ -297,6 +392,8 @@ async function runTurn(playerMove) {
   rival.moveThisTurn = rivalMove;
   player.guarding = false;
   rival.guarding = false;
+  queueTurnCallouts(playerMove, rivalMove);
+  await wait(260);
 
   const actors = [player, rival].sort((a, b) => b.stats.speed - a.stats.speed);
 
@@ -325,6 +422,13 @@ async function runTurn(playerMove) {
 
   turnLocked = false;
   setMenuEnabled(true);
+}
+
+function queueTurnCallouts(playerMove, rivalMove) {
+  turnCallouts = [
+    { fighter: player.name, move: moveLabel(player, playerMove), color: player.accent, age: 0 },
+    { fighter: rival.name, move: moveLabel(rival, rivalMove), color: rival.accent, age: 0 },
+  ];
 }
 
 function drawBackground() {
@@ -390,6 +494,35 @@ function drawHUD() {
   drawRevengeDial(W - 56, 82, rival.displayMeter, true);
   drawHealth(112, 34, 448, player.displayHealth, player.name, false);
   drawHealth(W - 560, 34, 448, rival.displayHealth, rival.name, true);
+  drawRoundScore();
+}
+
+function drawRoundScore() {
+  if (!match) return;
+  ctx.save();
+  ctx.font = "22px Bangers";
+  ctx.textAlign = "center";
+  ctx.fillStyle = "#f7f2dc";
+  ctx.strokeStyle = "#0b0d10";
+  ctx.lineWidth = 5;
+  ctx.strokeText(`ROUND ${match.round}`, W / 2, 42);
+  ctx.fillText(`ROUND ${match.round}`, W / 2, 42);
+  drawWinPips(W / 2 - 54, 70, match.playerWins, false, player.accent);
+  drawWinPips(W / 2 + 54, 70, match.rivalWins, true, rival.accent);
+  ctx.restore();
+}
+
+function drawWinPips(x, y, wins, flip, color) {
+  for (let i = 0; i < MATCH_WINS; i += 1) {
+    const offset = (flip ? 1 : -1) * i * 24;
+    ctx.fillStyle = i < wins ? color : "rgba(255,255,255,0.16)";
+    ctx.strokeStyle = "#0b0d10";
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.arc(x + offset, y, 8, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.fill();
+  }
 }
 
 function drawHealth(x, y, width, value, label, flip) {
@@ -484,11 +617,12 @@ function hasVictoryPoseOver(f, opponent) {
 function drawFighterSprite(f, sprite, opponent) {
   const hasVictoryPose = hasVictoryPoseOver(f, opponent);
   const poseKey = f.won
-    ? hasVictoryPose
+    ? f.winPose ||
+      (hasVictoryPose
       ? "victory"
-      : "celebration"
+      : "celebration")
     : f.anim
-      ? f.anim.type
+      ? f.anim.pose || f.anim.type
       : f.guarding
         ? "block"
         : f.hitFlash > 0.4
@@ -782,6 +916,7 @@ function tick(dt) {
   screenFlash = Math.max(0, screenFlash - dt * 2.6);
   updateSparks(dt);
   updateImpactTexts(dt);
+  updateTurnCallouts(dt);
   if (state === "fight" && player && !turnLocked) setMenuEnabled(true);
 }
 
@@ -790,6 +925,13 @@ function updateImpactTexts(dt) {
     t.age += dt;
   });
   impactTexts = impactTexts.filter((t) => t.age < 0.6);
+}
+
+function updateTurnCallouts(dt) {
+  turnCallouts.forEach((callout) => {
+    callout.age += dt;
+  });
+  turnCallouts = turnCallouts.filter((callout) => callout.age < 1.45);
 }
 
 function updateSparks(dt) {
@@ -841,6 +983,39 @@ function drawImpactTexts() {
   });
 }
 
+function drawTurnCallouts() {
+  if (!turnCallouts.length) return;
+  ctx.save();
+  turnCallouts.forEach((callout, index) => {
+    const p = Math.min(1, callout.age / 1.45);
+    const fadeIn = Math.min(1, callout.age / 0.16);
+    const fadeOut = Math.max(0, (p - 0.72) / 0.28);
+    const alpha = fadeIn * (1 - fadeOut);
+    const x = index === 0 ? 254 : W - 254;
+    const y = 132 + index * 48;
+    const w = 360;
+    const h = 44;
+    const slide = (1 - fadeIn) * (index === 0 ? -28 : 28);
+
+    ctx.globalAlpha = alpha;
+    ctx.fillStyle = "rgba(8, 13, 19, 0.78)";
+    roundRect(x - w / 2 + slide, y - h / 2, w, h, 6);
+    ctx.fill();
+    ctx.strokeStyle = callout.color;
+    ctx.lineWidth = 3;
+    ctx.stroke();
+    ctx.fillStyle = "#f7f2dc";
+    ctx.font = "21px Bangers";
+    ctx.textAlign = "center";
+    ctx.strokeStyle = "#0b0d10";
+    ctx.lineWidth = 4;
+    const text = `${callout.fighter}: ${callout.move}`;
+    ctx.strokeText(text, x + slide, y + 7);
+    ctx.fillText(text, x + slide, y + 7);
+  });
+  ctx.restore();
+}
+
 function drawScreenFlash() {
   if (screenFlash <= 0) return;
   ctx.save();
@@ -853,15 +1028,46 @@ function endRound(winner) {
   if (roundOver) return;
   roundOver = true;
   setMenuEnabled(false);
+  if (winner === player) match.playerWins += 1;
+  else match.rivalWins += 1;
+
+  const matchWinner = match.playerWins >= MATCH_WINS || match.rivalWins >= MATCH_WINS ? winner : null;
   winner.won = true;
+  winner.winPose = !matchWinner && winner.id === "trump" ? "taunt" : null;
   winner.anim = null;
   koAnimStart = performance.now();
-  showBanner(`${winner.name} Wins`);
+  koBannerText = matchWinner ? (winner === player ? "YOU WIN" : "MATCH LOST") : `${winner.name} Wins`;
+  showBanner(matchWinner ? `${winner.name} Takes Match` : `${winner.name} Wins Round`);
+
+  if (matchWinner) {
+    match.complete = true;
+    setTimeout(() => showMatchEnd(matchWinner), 2200);
+    return;
+  }
+
   setTimeout(() => {
-    state = "select";
-    selectScreen.classList.remove("hidden");
-    battleUI.classList.add("hidden");
+    match.round += 1;
+    startRound();
   }, 2200);
+}
+
+function showMatchEnd(winner) {
+  state = "matchEnd";
+  battleUI.classList.add("hidden");
+  setMenuEnabled(false);
+  matchResultTitle.textContent = winner === player ? "You Win" : "Match Lost";
+  matchResultText.textContent = `${winner.name} wins ${match.playerWins}-${match.rivalWins}`;
+  matchEndScreen.classList.remove("hidden");
+}
+
+function returnToSelect() {
+  state = "select";
+  matchEndScreen.classList.add("hidden");
+  battleUI.classList.add("hidden");
+  selectScreen.classList.remove("hidden");
+  roundOver = false;
+  turnLocked = false;
+  match = null;
 }
 
 function draw() {
@@ -870,13 +1076,14 @@ function draw() {
     ctx.translate((Math.random() - 0.5) * cameraShake, (Math.random() - 0.5) * cameraShake);
   }
   drawBackground();
-  if (state === "fight") {
+  if (state === "fight" || state === "matchEnd") {
     const hideRival = roundOver && player.won && hasVictoryPoseOver(player, rival);
     const hidePlayer = roundOver && rival.won && hasVictoryPoseOver(rival, player);
     if (!hidePlayer) drawFighter(player, rival);
     if (!hideRival) drawFighter(rival, player);
     drawSparks();
     drawImpactTexts();
+    drawTurnCallouts();
     drawScreenFlash();
     drawHUD();
     if (roundOver) drawKoBanner();
@@ -898,7 +1105,7 @@ function drawKoBanner() {
   ctx.translate(W / 2 + jitterX, H / 2 + jitterY);
   ctx.scale(scale, scale);
   ctx.translate(-W / 2, -H / 2);
-  centerText(player.health > rival.health ? "YOU WIN" : "K.O.", "#ffe04d", 92);
+  centerText(koBannerText, "#ffe04d", koBannerText.length > 8 ? 78 : 92);
   ctx.restore();
 }
 
@@ -930,9 +1137,14 @@ window.addEventListener("keydown", (event) => {
   if (key === "j") runTurn("light");
   if (key === "k") runTurn("heavy");
   if (key === "l") runTurn("special");
-  if (key === " " || key === "s") runTurn("block");
+  if (key === " " || key === "s") {
+    event.preventDefault();
+    runTurn("block");
+  }
 });
 
 startButton.addEventListener("click", startMatch);
+rematchButton.addEventListener("click", startMatch);
+selectButton.addEventListener("click", returnToSelect);
 buildRoster();
 requestAnimationFrame(loop);

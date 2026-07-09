@@ -127,14 +127,15 @@ Object.entries(SFX_SOURCES).forEach(([key, sources]) => {
 let sfxMuted = false;
 
 function playSfx(key, volume = 1) {
-  if (sfxMuted) return;
+  if (sfxMuted) return null;
   const takes = sfxPools[key];
-  if (!takes || !takes.length) return;
+  if (!takes || !takes.length) return null;
   const pool = takes[Math.floor(Math.random() * takes.length)];
   const audio = pool.find((a) => a.paused || a.ended) || pool[0];
   audio.volume = volume;
   audio.currentTime = 0;
   audio.play().catch(() => {});
+  return audio;
 }
 
 function setSfxMuted(muted) {
@@ -458,7 +459,8 @@ function impactSfxKey(attacker, type) {
 function performAttack(attacker, defender, type, matchup) {
   const data = moveData(attacker, type);
   attacker.anim = { type, pose: data.pose || type, start: performance.now(), duration: data.duration * 1000 };
-  playSfx(swingSfxKey(attacker, type), 0.75);
+  const specialSfx = [];
+  specialSfx.push(playSfx(swingSfxKey(attacker, type), 0.75));
   return new Promise((resolve) => {
     setTimeout(() => {
       const blocked = defender.moveThisTurn === "block";
@@ -486,7 +488,7 @@ function performAttack(attacker, defender, type, matchup) {
       defender.health = Math.max(0, defender.health - dmg);
       if (blocked) playSfx("block", 0.7);
       else {
-        playSfx(impactSfxKey(attacker, type), 0.85);
+        specialSfx.push(playSfx(impactSfxKey(attacker, type), 0.85));
         playSfx("hitHurt", 0.5);
       }
       if (lethal) playSfx("koFall", 0.8);
@@ -548,6 +550,9 @@ function performAttack(attacker, defender, type, matchup) {
     }, data.activeAt * data.duration * 1000);
     setTimeout(() => {
       attacker.anim = null;
+      if (type === "special") {
+        specialSfx.forEach((audio) => audio && audio.pause());
+      }
       resolve();
     }, data.duration * 1000 + 160);
   });

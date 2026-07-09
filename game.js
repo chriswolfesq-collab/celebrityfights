@@ -4,10 +4,15 @@ const selectScreen = document.getElementById("selectScreen");
 const rosterEl = document.getElementById("roster");
 const startButton = document.getElementById("startButton");
 const roundBanner = document.getElementById("roundBanner");
+const battleUI = document.getElementById("battleUI");
+const actionMenu = document.getElementById("actionMenu");
+const moveButtons = Array.from(document.querySelectorAll(".move-btn"));
 
 const W = canvas.width;
 const H = canvas.height;
 const floorY = 626;
+const leftX = 410;
+const rightX = 870;
 
 // Figure-free arena backdrop (the two presidents were cut out of the key art
 // and are now drawn as playable sprites on top of this plate).
@@ -37,8 +42,8 @@ Object.entries(spriteSources).forEach(([id, info]) => {
   fighterSprites[id] = entry;
 });
 
-// Per-move pose swaps: while a fighter is mid-attack, drawFighterSprite will
-// use one of these in place of the idle cutout if one is defined and loaded.
+// Per-move pose swaps: while a fighter's turn animation is playing, drawFighterSprite
+// will use one of these in place of the idle cutout if one is defined and loaded.
 // scale corrects for photos with a much wider stance than the idle cutout
 // (e.g. a wide punch or a low duck) so a fixed sprite height doesn't force
 // their width out and make the fighter look bigger than in other poses.
@@ -47,9 +52,7 @@ const altSpriteSources = {
     light: { src: "assets/sprites/washington-punch.png", nativeSide: 1 },
     heavy: { src: "assets/sprites/washington-kick.png", nativeSide: 1 },
     special: { src: "assets/sprites/washington-swordlunge.png", nativeSide: 1, scale: 0.82 },
-    jump: { src: "assets/sprites/washington-jump.png", nativeSide: 1 },
     block: { src: "assets/sprites/washington-duck.png", nativeSide: 1, scale: 0.72 },
-    walk: { src: "assets/sprites/washington-walk.png", nativeSide: 1 },
   },
 };
 const altFighterSprites = {};
@@ -77,7 +80,7 @@ const fighters = [
     outfit: "#263247",
     accent: "#c9b078",
     special: "Valley Forge Slash",
-    stats: { speed: 4.7, power: 1.14, reach: 92 },
+    stats: { speed: 4.7, power: 1.14 },
   },
   {
     id: "trump",
@@ -89,9 +92,16 @@ const fighters = [
     outfit: "#242936",
     accent: "#f4f1e8",
     special: "Rally Counter",
-    stats: { speed: 4.6, power: 1.18, reach: 86 },
+    stats: { speed: 4.6, power: 1.18 },
   },
 ];
+
+const MOVE_LABELS = {
+  light: "Jab",
+  heavy: "Heavy Strike",
+  special: null, // filled in per-fighter with their special name
+  block: "Guard",
+};
 
 let selectedId = fighters[0].id;
 let player;
@@ -99,37 +109,35 @@ let rival;
 let cameraShake = 0;
 let hitSparks = [];
 let state = "select";
-let paused = false;
+let turnLocked = false;
 let roundOver = false;
-let timer = 88;
 let lastTick = performance.now();
-let aiCooldown = 0;
-const keys = new Set();
+
+function moveData(type) {
+  return {
+    light: { damage: 9, duration: 0.5, activeAt: 0.52, gain: 12, label: "Jab" },
+    heavy: { damage: 16, duration: 0.62, activeAt: 0.56, gain: 16, label: "Heavy Strike" },
+    special: { damage: 24, duration: 0.75, activeAt: 0.6, gain: 0, label: null },
+  }[type];
+}
 
 function makeFighter(template, x, side, isPlayer) {
   return {
     ...template,
     x,
     y: floorY,
-    vx: 0,
-    vy: 0,
     side,
-    width: 108,
-    height: 270,
     health: 100,
+    displayHealth: 100,
     meter: 24,
-    combo: 0,
-    comboTimer: 0,
-    hitstun: 0,
-    block: false,
-    attacking: null,
-    attackTimer: 0,
-    attackLanded: false,
-    grounded: true,
+    displayMeter: 24,
     isPlayer,
     bob: Math.random() * Math.PI,
-    landSquash: 0,
-    wasGrounded: true,
+    hitFlash: 0,
+    knockback: 0,
+    anim: null,
+    guarding: false,
+    moveThisTurn: null,
   };
 }
 
@@ -153,25 +161,124 @@ function buildRoster() {
 
 function startMatch() {
   const chosen = fighters.find((fighter) => fighter.id === selectedId);
-  const pool = fighters.filter((fighter) => fighter.id !== selectedId);
   const opponent = chosen.id === "trump" ? fighters[0] : fighters[1];
   window.scrollTo({ top: 0, behavior: "auto" });
-  player = makeFighter(chosen, 410, 1, true);
-  rival = makeFighter(opponent, 840, -1, false);
-  timer = 88;
+  player = makeFighter(chosen, leftX, 1, true);
+  rival = makeFighter(opponent, rightX, -1, false);
   state = "fight";
   roundOver = false;
-  paused = false;
-  lastTick = performance.now();
+  turnLocked = false;
+  updateSpecialButtonLabel();
+  setMenuEnabled(true);
   selectScreen.classList.add("hidden");
+  battleUI.classList.remove("hidden");
   showBanner("Round 1");
   setTimeout(() => showBanner("Fight!"), 900);
+}
+
+function updateSpecialButtonLabel() {
+  const btn = moveButtons.find((b) => b.dataset.move === "special");
+  if (btn) btn.textContent = player.special;
 }
 
 function showBanner(text) {
   roundBanner.textContent = text;
   roundBanner.classList.add("show");
   setTimeout(() => roundBanner.classList.remove("show"), 720);
+}
+
+function setMenuEnabled(enabled) {
+  moveButtons.forEach((btn) => {
+    const isSpecial = btn.dataset.move === "special";
+    const specialLocked = isSpecial && player && player.meter < 35;
+    btn.disabled = !enabled || specialLocked;
+  });
+}
+
+function chooseAiMove() {
+  if (rival.health < 30 && Math.random() < 0.32) return "block";
+  const roll = Math.random();
+  if (roll > 0.72 && rival.meter >= 35) return "special";
+  if (roll > 0.42) return "heavy";
+  return "light";
+}
+
+function wait(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function guardBeat(fighter) {
+  fighter.guarding = true;
+  await wait(360);
+}
+
+function performAttack(attacker, defender, type) {
+  const data = moveData(type);
+  attacker.anim = { type, start: performance.now(), duration: data.duration * 1000 };
+  return new Promise((resolve) => {
+    setTimeout(() => {
+      const blocked = defender.moveThisTurn === "block";
+      const dmg = data.damage * attacker.stats.power * (blocked ? 0.28 : 1);
+      defender.health = Math.max(0, defender.health - dmg);
+      defender.hitFlash = 1;
+      defender.knockback = blocked ? 10 : 26;
+      attacker.meter = Math.min(100, attacker.meter + data.gain);
+      if (type === "special") attacker.meter = Math.max(0, attacker.meter - 35);
+      cameraShake = blocked ? 5 : 12;
+      hitSparks.push({
+        x: defender.x - defender.side * 72,
+        y: defender.y - 190,
+        age: 0,
+        color: blocked ? "#20d6ff" : attacker.accent,
+      });
+    }, data.activeAt * data.duration * 1000);
+    setTimeout(() => {
+      attacker.anim = null;
+      resolve();
+    }, data.duration * 1000 + 160);
+  });
+}
+
+async function runTurn(playerMove) {
+  if (turnLocked || roundOver || state !== "fight") return;
+  if (playerMove === "special" && player.meter < 35) return;
+
+  turnLocked = true;
+  setMenuEnabled(false);
+
+  const rivalMove = chooseAiMove();
+  player.moveThisTurn = playerMove;
+  rival.moveThisTurn = rivalMove;
+  player.guarding = false;
+  rival.guarding = false;
+
+  const actors = [player, rival].sort((a, b) => b.stats.speed - a.stats.speed);
+
+  for (const actor of actors) {
+    if (actor.health <= 0) continue;
+    const defender = actor === player ? rival : player;
+    if (actor.moveThisTurn === "block") {
+      await guardBeat(actor);
+      continue;
+    }
+    await performAttack(actor, defender, actor.moveThisTurn);
+    if (defender.health <= 0) break;
+  }
+
+  player.guarding = false;
+  rival.guarding = false;
+  player.moveThisTurn = null;
+  rival.moveThisTurn = null;
+  player.meter = Math.min(100, player.meter + 4);
+  rival.meter = Math.min(100, rival.meter + 4);
+
+  if (player.health <= 0 || rival.health <= 0) {
+    endRound(player.health > rival.health ? player : rival);
+    return;
+  }
+
+  turnLocked = false;
+  setMenuEnabled(true);
 }
 
 function drawBackground() {
@@ -188,34 +295,6 @@ function drawBackground() {
   ctx.fillStyle = sky;
   ctx.fillRect(0, 0, W, H);
 
-  ctx.save();
-  ctx.globalAlpha = 0.96;
-  for (let i = 0; i < 9; i += 1) {
-    const x = i * 170 - 70;
-    const h = 320 + (i % 3) * 44;
-    ctx.fillStyle = i % 2 ? "#222b30" : "#2b2728";
-    ctx.fillRect(x, floorY - h, 132, h);
-    ctx.fillStyle = "rgba(255, 110, 38, 0.72)";
-    ctx.fillRect(x + 22, floorY - h + 72, 18, 74);
-    ctx.fillRect(x + 76, floorY - h + 124, 16, 56);
-    ctx.fillStyle = "rgba(255, 197, 79, 0.18)";
-    ctx.fillRect(x + 20, floorY - h + 72, 74, 74);
-  }
-  ctx.restore();
-
-  ctx.save();
-  ctx.globalCompositeOperation = "screen";
-  for (let i = 0; i < 5; i += 1) {
-    const glow = ctx.createRadialGradient(150 + i * 260, 392, 8, 150 + i * 260, 392, 160);
-    glow.addColorStop(0, "rgba(46, 194, 255, 0.18)");
-    glow.addColorStop(1, "rgba(46, 194, 255, 0)");
-    ctx.fillStyle = glow;
-    ctx.beginPath();
-    ctx.ellipse(150 + i * 260, 392 + Math.sin(performance.now() / 900 + i) * 8, 132, 26, 0, 0, Math.PI * 2);
-    ctx.fill();
-  }
-  ctx.restore();
-
   const floor = ctx.createLinearGradient(0, floorY, 0, H);
   floor.addColorStop(0, "#5b4d3f");
   floor.addColorStop(1, "#2f2925");
@@ -228,22 +307,6 @@ function drawBackground() {
   ctx.moveTo(0, floorY);
   ctx.lineTo(W, floorY);
   ctx.stroke();
-
-  for (let x = -120; x < W + 160; x += 128) {
-    ctx.strokeStyle = "rgba(139, 95, 67, 0.72)";
-    ctx.lineWidth = 3;
-    ctx.beginPath();
-    ctx.moveTo(x, floorY + 4);
-    ctx.lineTo(x + 84, H);
-    ctx.stroke();
-  }
-  for (let y = floorY + 24; y < H; y += 36) {
-    ctx.strokeStyle = "rgba(12, 13, 14, 0.34)";
-    ctx.beginPath();
-    ctx.moveTo(0, y);
-    ctx.lineTo(W, y);
-    ctx.stroke();
-  }
 
   ctx.fillStyle = "rgba(0, 0, 0, 0.22)";
   ctx.fillRect(0, 0, W, H);
@@ -277,39 +340,10 @@ function drawArena() {
 }
 
 function drawHUD() {
-  drawRevengeDial(56, 82, player.meter, false);
-  drawRevengeDial(W - 56, 82, rival.meter, true);
-  drawHealth(112, 34, 448, player.health, player.name, false);
-  drawHealth(W - 560, 34, 448, rival.health, rival.name, true);
-
-  ctx.fillStyle = "#111016";
-  roundRect(W / 2 - 82, 24, 164, 110, 10);
-  ctx.fill();
-  ctx.strokeStyle = "#f6efe0";
-  ctx.lineWidth = 5;
-  ctx.stroke();
-  ctx.strokeStyle = "#58252b";
-  ctx.lineWidth = 3;
-  roundRect(W / 2 - 70, 35, 140, 88, 8);
-  ctx.stroke();
-  ctx.fillStyle = "#ffdc40";
-  ctx.font = "28px Bangers";
-  ctx.textAlign = "center";
-  ctx.fillText("K.O.", W / 2, 53);
-  ctx.fillStyle = "#fff2e4";
-  ctx.shadowColor = "#ff404e";
-  ctx.shadowBlur = 18;
-  ctx.font = "76px Bangers";
-  ctx.fillText(String(Math.ceil(timer)).padStart(2, "0"), W / 2, 119);
-  ctx.shadowBlur = 0;
-
-  drawSegmentMeter(118, 92, player.meter, false);
-  drawSegmentMeter(W - 118, 92, rival.meter, true);
-  drawCombo(460, 101, player.combo, false);
-  drawCombo(W - 460, 101, rival.combo, true);
-  drawPausePlate();
-
-  if (paused) centerText("PAUSE", "#fff2e4", 86);
+  drawRevengeDial(56, 82, player.displayMeter, false);
+  drawRevengeDial(W - 56, 82, rival.displayMeter, true);
+  drawHealth(112, 34, 448, player.displayHealth, player.name, false);
+  drawHealth(W - 560, 34, 448, rival.displayHealth, rival.name, true);
 }
 
 function drawHealth(x, y, width, value, label, flip) {
@@ -342,48 +376,6 @@ function drawHealth(x, y, width, value, label, flip) {
   ctx.restore();
 }
 
-function drawSegmentMeter(x, y, meter, flip) {
-  const segmentWidth = 66;
-  const gap = 10;
-  const total = 4 * segmentWidth + 3 * gap;
-  const start = flip ? x - total : x;
-  for (let i = 0; i < 4; i += 1) {
-    const sx = start + i * (segmentWidth + gap);
-    ctx.fillStyle = "#0b1117";
-    roundRect(sx, y, segmentWidth, 20, 5);
-    ctx.fill();
-    ctx.strokeStyle = "#aeb5bf";
-    ctx.lineWidth = 3;
-    ctx.stroke();
-    const fill = Math.max(0, Math.min(1, (meter - i * 25) / 25));
-    ctx.fillStyle = "#2aa7ff";
-    ctx.fillRect(sx + 4, y + 4, (segmentWidth - 8) * fill, 12);
-  }
-}
-
-function drawCombo(x, y, combo, flip) {
-  ctx.fillStyle = "#20d6ff";
-  ctx.font = "28px Bangers";
-  ctx.textAlign = flip ? "right" : "left";
-  ctx.strokeStyle = "#111319";
-  ctx.lineWidth = 5;
-  ctx.strokeText(`COMBO ${combo}`, x, y + 18);
-  ctx.fillText(`COMBO ${combo}`, x, y + 18);
-}
-
-function drawPausePlate() {
-  ctx.fillStyle = "#f7f2dc";
-  roundRect(W / 2 - 65, 140, 130, 42, 6);
-  ctx.fill();
-  ctx.strokeStyle = "#402024";
-  ctx.lineWidth = 4;
-  ctx.stroke();
-  ctx.fillStyle = "#51252a";
-  ctx.font = "34px Bangers";
-  ctx.textAlign = "center";
-  ctx.fillText("PAUSE", W / 2, 173);
-}
-
 function drawRevengeDial(x, y, meter, flip) {
   ctx.save();
   ctx.translate(x, y);
@@ -395,7 +387,7 @@ function drawRevengeDial(x, y, meter, flip) {
   ctx.strokeStyle = "#aeb5bf";
   ctx.lineWidth = 5;
   ctx.stroke();
-  ctx.strokeStyle = "#42e66c";
+  ctx.strokeStyle = meter >= 35 ? "#42e66c" : "#5a6472";
   ctx.lineWidth = 9;
   ctx.beginPath();
   ctx.arc(0, 0, 36, -Math.PI * 0.78, -Math.PI * 0.78 + Math.PI * 1.55 * (meter / 100));
@@ -408,7 +400,7 @@ function drawRevengeDial(x, y, meter, flip) {
   ctx.font = "18px Bangers";
   ctx.textAlign = "center";
   ctx.rotate(-Math.PI / 2);
-  ctx.fillText("REVENGE", 0, -54);
+  ctx.fillText("SPECIAL", 0, -54);
   ctx.restore();
 }
 
@@ -425,26 +417,17 @@ function centerText(text, color, size) {
   ctx.shadowBlur = 0;
 }
 
-function drawFighter(f) {
+function drawFighter(f, opponent) {
   const sprite = fighterSprites[f.id];
   if (sprite && sprite.ready) {
-    drawFighterSprite(f, sprite);
+    drawFighterSprite(f, sprite, opponent);
     return;
   }
-  drawFighterVector(f);
+  drawFighterVector(f, opponent);
 }
 
-function drawFighterSprite(f, sprite) {
-  const movingForward = f.grounded && f.vx !== 0 && Math.sign(f.vx) === f.side;
-  const poseKey = f.attacking
-    ? f.attacking
-    : f.block
-    ? "block"
-    : !f.grounded
-    ? "jump"
-    : movingForward
-    ? "walk"
-    : null;
+function drawFighterSprite(f, sprite, opponent) {
+  const poseKey = f.anim ? f.anim.type : f.guarding ? "block" : null;
   const alt = poseKey && altFighterSprites[f.id] && altFighterSprites[f.id][poseKey];
   const activeSprite = alt && alt.ready ? alt : sprite;
   const img = activeSprite.img;
@@ -458,57 +441,43 @@ function drawFighterSprite(f, sprite) {
   let extraX = 0;
   let extraY = 0;
 
-  // walking: lean whole body in the direction of travel
-  if (f.grounded && !f.attacking) {
-    const walkLean = Math.max(-1, Math.min(1, f.vx / f.stats.speed));
-    rotate += walkLean * 0.07;
-  }
+  const squash = f.guarding ? 0.94 : 1;
+  if (f.guarding) rotate += -f.side * 0.05;
 
-  // jump: stretch going up, compress coming down
-  if (!f.grounded) {
-    if (f.vy < 0) {
-      scaleY *= 1.1;
-      scaleX *= 0.93;
-    } else {
-      scaleY *= 0.96;
-      scaleX *= 1.04;
-    }
-  }
-  if (f.landSquash > 0) {
-    scaleY *= 1 - 0.24 * f.landSquash;
-    scaleX *= 1 + 0.24 * f.landSquash;
-  }
-
-  // block: crouch and lean back on guard
-  const squash = f.block ? 0.94 : 1;
-  if (f.block) rotate += -f.side * 0.05;
-
-  // attacks: punch/kick lunge with wind-up-and-follow-through arc
-  if (f.attacking) {
-    const data = attackData(f.attacking);
-    const t = Math.min(1, Math.max(0, 1 - f.attackTimer / data.duration));
+  // attacks: fighter closes the gap and lunges into the opponent, then
+  // recoils back to their spot, following a wind-up-and-follow-through arc.
+  const gap = opponent ? Math.abs(opponent.x - f.x) : 460;
+  if (f.anim) {
+    const elapsed = (performance.now() - f.anim.start) / f.anim.duration;
+    const t = Math.min(1, Math.max(0, elapsed));
     const swing = Math.sin(Math.PI * t);
-    if (f.attacking === "light") {
-      extraX = f.side * swing * 30;
+    if (f.anim.type === "light") {
+      const travel = Math.max(40, gap - 150);
+      extraX = f.side * swing * travel;
       rotate += f.side * swing * 0.14;
       scaleX *= 1 + swing * 0.06;
-    } else if (f.attacking === "heavy") {
-      extraX = f.side * swing * 46;
+    } else if (f.anim.type === "heavy") {
+      const travel = Math.max(40, gap - 120);
+      extraX = f.side * swing * travel;
       extraY = -swing * 16;
       rotate += f.side * swing * 0.26;
       scaleX *= 1 + swing * 0.1;
       scaleY *= 1 - swing * 0.05;
-    } else if (f.attacking === "special") {
-      extraX = f.side * swing * 34;
+    } else if (f.anim.type === "special") {
+      const travel = Math.max(40, gap - 100);
+      extraX = f.side * swing * travel;
       rotate += f.side * Math.sin(Math.PI * 2 * t) * 0.3;
       scaleX *= 1 + swing * 0.08;
     }
   }
 
-  // hitstun: snap back from the impact
-  if (f.hitstun > 0.001) {
+  // hitstun flash: snap back from the impact, knocked away from the attacker
+  if (f.hitFlash > 0.001) {
     rotate += -f.side * 0.12;
     scaleX *= 0.95;
+  }
+  if (f.knockback > 0.001) {
+    extraX += -f.side * f.knockback;
   }
 
   const cx = f.x + extraX;
@@ -522,7 +491,7 @@ function drawFighterSprite(f, sprite) {
   ctx.restore();
 
   // special-move aura in front of the lead hand
-  if (f.attacking === "special") {
+  if (f.anim && f.anim.type === "special") {
     const gx = f.x + f.side * 96;
     const gy = f.y - 168;
     ctx.save();
@@ -542,16 +511,26 @@ function drawFighterSprite(f, sprite) {
   ctx.translate(cx, f.y + 6 + extraY);
   ctx.rotate(rotate);
   ctx.scale(f.side * activeSprite.nativeSide * scaleX, scaleY);
-  if (f.hitstun > 0.001) ctx.filter = "brightness(1.7) saturate(1.3)";
+  if (f.hitFlash > 0.001) ctx.filter = `brightness(${1 + f.hitFlash * 0.7}) saturate(1.3)`;
   const dh = h * squash;
   ctx.drawImage(img, -w / 2, -dh + bob, w, dh);
   ctx.filter = "none";
   ctx.restore();
 }
 
-function drawFighterVector(f) {
-  const crouch = f.block ? 24 : 0;
-  const x = f.x;
+function drawFighterVector(f, opponent) {
+  const crouch = f.guarding ? 24 : 0;
+  const gap = opponent ? Math.abs(opponent.x - f.x) : 460;
+  let lungeX = 0;
+  if (f.anim) {
+    const elapsed = (performance.now() - f.anim.start) / f.anim.duration;
+    const t = Math.min(1, Math.max(0, elapsed));
+    const swing = Math.sin(Math.PI * t);
+    const buffer = f.anim.type === "light" ? 150 : f.anim.type === "heavy" ? 120 : 100;
+    lungeX = f.side * swing * Math.max(40, gap - buffer);
+  }
+  const knockX = f.knockback > 0.001 ? -f.side * f.knockback : 0;
+  const x = f.x + lungeX + knockX;
   const y = f.y + Math.sin(f.bob) * 3;
   const facing = f.side;
   ctx.save();
@@ -563,20 +542,20 @@ function drawFighterVector(f) {
   ctx.ellipse(0, 12, 96, 18, 0, 0, Math.PI * 2);
   ctx.fill();
 
-  const lean = f.attacking ? 22 : 0;
-  const recoil = f.hitstun > 0 ? -18 : 0;
+  const lean = f.anim ? 22 : 0;
+  const recoil = f.hitFlash > 0 ? -18 : 0;
   drawLeg(-32 + recoil, -128 + crouch, -58, -64 + crouch, -82, -12, f.outfit, f.accent, true);
   drawLeg(34 + recoil, -124 + crouch, 48, -58 + crouch, 72, -12, f.outfit, f.accent, false);
   drawTorso(0 + lean + recoil, -246 + crouch, f);
   drawHead(10 + lean + recoil, -322 + crouch, f);
   drawArm(-54 + lean + recoil, -224 + crouch, -92, -182 + crouch, -118, -136 + crouch, f.skin, f.accent, false);
 
-  const reach = f.attacking ? f.stats.reach + 68 + (f.attacking === "heavy" ? 42 : 0) : 94;
-  const armY = f.attacking === "special" ? -212 + Math.sin(performance.now() / 45) * 10 : -188;
-  const elbowX = f.attacking ? 106 : 82;
+  const reach = f.anim ? 94 + 68 + (f.anim.type === "heavy" ? 42 : 0) : 94;
+  const armY = f.anim && f.anim.type === "special" ? -212 + Math.sin(performance.now() / 45) * 10 : -188;
+  const elbowX = f.anim ? 106 : 82;
   drawArm(56 + lean + recoil, -224 + crouch, elbowX, -200 + crouch, reach, armY + crouch, f.skin, f.accent, true);
 
-  if (f.attacking === "special") {
+  if (f.anim && f.anim.type === "special") {
     ctx.globalCompositeOperation = "screen";
     ctx.globalAlpha = 0.82;
     ctx.strokeStyle = f.accent;
@@ -599,11 +578,9 @@ function drawFighterVector(f) {
 function drawTorso(x, y, f) {
   ctx.save();
   ctx.translate(x, y);
-  const bareChest = f.id === "jax";
-  const torsoColor = bareChest ? f.skin : f.outfit;
   ctx.strokeStyle = "#080b0f";
   ctx.lineWidth = 8;
-  ctx.fillStyle = torsoColor;
+  ctx.fillStyle = f.outfit;
   ctx.beginPath();
   ctx.moveTo(-62, 8);
   ctx.quadraticCurveTo(-44, -20, -6, -24);
@@ -613,37 +590,18 @@ function drawTorso(x, y, f) {
   ctx.closePath();
   ctx.stroke();
   ctx.fill();
-  if (bareChest) {
-    ctx.strokeStyle = "rgba(84, 38, 30, 0.68)";
-    ctx.lineWidth = 4;
-    ctx.beginPath();
-    ctx.moveTo(0, 10);
-    ctx.lineTo(0, 118);
-    ctx.moveTo(-36, 34);
-    ctx.quadraticCurveTo(-14, 48, 0, 38);
-    ctx.moveTo(36, 34);
-    ctx.quadraticCurveTo(14, 48, 0, 38);
-    ctx.moveTo(-26, 75);
-    ctx.lineTo(26, 75);
-    ctx.moveTo(-24, 99);
-    ctx.lineTo(24, 99);
-    ctx.stroke();
-    ctx.fillStyle = f.outfit;
-    ctx.fillRect(-48, 122, 96, 24);
-  } else {
-    ctx.fillStyle = "rgba(255,255,255,0.18)";
-    ctx.beginPath();
-    ctx.ellipse(-22, 24, 18, 62, -0.26, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = "rgba(0,0,0,0.2)";
-    ctx.beginPath();
-    ctx.ellipse(30, 46, 18, 72, -0.15, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = f.accent;
-    ctx.fillRect(-48, 84, 96, 16);
-    ctx.fillStyle = "rgba(255,255,255,0.32)";
-    ctx.fillRect(-44, 87, 88, 4);
-  }
+  ctx.fillStyle = "rgba(255,255,255,0.18)";
+  ctx.beginPath();
+  ctx.ellipse(-22, 24, 18, 62, -0.26, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = "rgba(0,0,0,0.2)";
+  ctx.beginPath();
+  ctx.ellipse(30, 46, 18, 72, -0.15, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = f.accent;
+  ctx.fillRect(-48, 84, 96, 16);
+  ctx.fillStyle = "rgba(255,255,255,0.32)";
+  ctx.fillRect(-44, 87, 88, 4);
   ctx.restore();
 }
 
@@ -737,124 +695,20 @@ function roundRect(x, y, width, height, radius) {
   ctx.closePath();
 }
 
-function update(dt) {
-  if (state !== "fight" || paused || roundOver) return;
-
-  timer -= dt;
-  if (timer <= 0) endRound(player.health >= rival.health ? player : rival);
-
-  handlePlayerInput();
-  handleAI(dt);
-  updateFighter(player, dt);
-  updateFighter(rival, dt);
-  resolveCollision();
+// Cosmetic-only per-frame tick: idle bob, hit-flash decay, camera shake decay,
+// and a health/meter-bar lerp toward the true values. No physics, no input
+// polling, no collision -- the actual fight logic lives in runTurn().
+function tick(dt) {
+  [player, rival].forEach((f) => {
+    if (!f) return;
+    f.bob += dt * 5;
+    f.hitFlash = Math.max(0, f.hitFlash - dt * 3);
+    f.knockback = Math.max(0, f.knockback - dt * 90);
+    f.displayHealth += (f.health - f.displayHealth) * Math.min(1, dt * 6);
+    f.displayMeter += (f.meter - f.displayMeter) * Math.min(1, dt * 6);
+  });
   updateSparks(dt);
-
-  if (player.health <= 0) endRound(rival);
-  if (rival.health <= 0) endRound(player);
-}
-
-function handlePlayerInput() {
-  if (player.hitstun > 0) return;
-  player.block = keys.has("s");
-  player.vx = 0;
-  if (keys.has("a")) player.vx = -player.stats.speed;
-  if (keys.has("d")) player.vx = player.stats.speed;
-  if (keys.has("w") && player.grounded) {
-    player.vy = -16;
-    player.grounded = false;
-  }
-}
-
-function handleAI(dt) {
-  aiCooldown -= dt;
-  rival.side = rival.x > player.x ? -1 : 1;
-  const distance = Math.abs(rival.x - player.x);
-  if (rival.hitstun > 0) return;
-  rival.block = player.attacking && distance < 130 && Math.random() < 0.55;
-  rival.vx = 0;
-  if (distance > 210) rival.vx = -rival.side * rival.stats.speed * 0.72;
-  if (distance < 132) rival.vx = rival.side * rival.stats.speed * 0.48;
-  if (aiCooldown <= 0 && distance < 205) {
-    const roll = Math.random();
-    attack(rival, roll > 0.72 && rival.meter > 32 ? "special" : roll > 0.42 ? "heavy" : "light");
-    aiCooldown = 0.7 + Math.random() * 0.65;
-  }
-}
-
-function updateFighter(f, dt) {
-  f.side = f.x > (f.isPlayer ? rival.x : player.x) ? -1 : 1;
-  f.bob += dt * (6 + Math.abs(f.vx) * 3);
-  f.hitstun = Math.max(0, f.hitstun - dt);
-  f.comboTimer = Math.max(0, f.comboTimer - dt);
-  if (f.comboTimer === 0) f.combo = 0;
-  f.landSquash = Math.max(0, f.landSquash - dt * 4.5);
-
-  if (f.attackTimer > 0) {
-    f.attackTimer -= dt;
-    if (!f.attackLanded && f.attackTimer < attackData(f.attacking).activeAt) tryHit(f, f.isPlayer ? rival : player);
-    if (f.attackTimer <= 0) f.attacking = null;
-  }
-
-  f.wasGrounded = f.grounded;
-  f.x += f.vx;
-  f.vy += 0.85;
-  f.y += f.vy;
-  f.grounded = false;
-  if (f.y >= floorY) {
-    f.y = floorY;
-    f.vy = 0;
-    f.grounded = true;
-    if (!f.wasGrounded) f.landSquash = 1;
-  }
-  f.x = Math.max(145, Math.min(W - 145, f.x));
-  f.meter = Math.min(100, f.meter + dt * 3.5);
-}
-
-function resolveCollision() {
-  const gap = rival.x - player.x;
-  const minGap = 150;
-  if (Math.abs(gap) < minGap) {
-    const push = (minGap - Math.abs(gap)) / 2;
-    player.x -= Math.sign(gap || 1) * push;
-    rival.x += Math.sign(gap || 1) * push;
-  }
-}
-
-function attack(f, type) {
-  if (f.attacking || f.hitstun > 0) return;
-  const data = attackData(type);
-  if (type === "special" && f.meter < 35) return;
-  if (type === "special") f.meter -= 35;
-  f.attacking = type;
-  f.attackTimer = data.duration;
-  f.attackLanded = false;
-}
-
-function attackData(type) {
-  return {
-    light: { damage: 7, duration: 0.28, activeAt: 0.16, range: 164, stun: 0.24, gain: 11 },
-    heavy: { damage: 13, duration: 0.48, activeAt: 0.28, range: 196, stun: 0.38, gain: 16 },
-    special: { damage: 18, duration: 0.6, activeAt: 0.36, range: 232, stun: 0.52, gain: 4 },
-  }[type];
-}
-
-function tryHit(attacker, defender) {
-  const data = attackData(attacker.attacking);
-  const distance = Math.abs(attacker.x - defender.x);
-  const facingTarget = Math.sign(defender.x - attacker.x) === attacker.side;
-  attacker.attackLanded = true;
-  if (!facingTarget || distance > data.range || Math.abs(attacker.y - defender.y) > 90) return;
-  const blocked = defender.block && Math.sign(attacker.x - defender.x) === defender.side;
-  const damage = data.damage * attacker.stats.power * (blocked ? 0.28 : 1);
-  defender.health = Math.max(0, defender.health - damage);
-  defender.hitstun = blocked ? 0.12 : data.stun;
-  defender.vx = attacker.side * (blocked ? 7 : 13);
-  attacker.combo += blocked ? 0 : 1;
-  attacker.comboTimer = 1.8;
-  attacker.meter = Math.min(100, attacker.meter + data.gain);
-  cameraShake = blocked ? 5 : 12;
-  hitSparks.push({ x: defender.x - defender.side * 72, y: defender.y - 190, age: 0, color: blocked ? "#20d6ff" : attacker.accent });
+  if (state === "fight" && player && !turnLocked) setMenuEnabled(true);
 }
 
 function updateSparks(dt) {
@@ -887,10 +741,12 @@ function drawSparks() {
 function endRound(winner) {
   if (roundOver) return;
   roundOver = true;
+  setMenuEnabled(false);
   showBanner(`${winner.name} Wins`);
   setTimeout(() => {
     state = "select";
     selectScreen.classList.remove("hidden");
+    battleUI.classList.add("hidden");
   }, 2200);
 }
 
@@ -901,8 +757,8 @@ function draw() {
   }
   drawBackground();
   if (state === "fight") {
-    drawFighter(player.x < rival.x ? player : rival);
-    drawFighter(player.x < rival.x ? rival : player);
+    drawFighter(player, rival);
+    drawFighter(rival, player);
     drawSparks();
     drawHUD();
     if (roundOver) centerText(player.health > rival.health ? "YOU WIN" : "K.O.", "#ffe04d", 92);
@@ -913,34 +769,34 @@ function draw() {
 }
 
 function drawAttractMode() {
-  const demoA = makeFighter(fighters[0], 410, 1, true);
-  const demoB = makeFighter(fighters[1], 870, -1, false);
-  demoA.side = 1;
-  demoB.side = -1;
-  drawFighter(demoA);
-  drawFighter(demoB);
+  const demoA = makeFighter(fighters[0], leftX, 1, true);
+  const demoB = makeFighter(fighters[1], rightX, -1, false);
+  drawFighter(demoA, demoB);
+  drawFighter(demoB, demoA);
 }
 
 function loop(now) {
   const dt = Math.min(0.033, (now - lastTick) / 1000);
   lastTick = now;
-  update(dt);
+  tick(dt);
   draw();
   requestAnimationFrame(loop);
 }
 
-window.addEventListener("keydown", (event) => {
-  const key = event.key.toLowerCase();
-  keys.add(key);
-  if (state !== "fight" || !player) return;
-  if (key === "j") attack(player, "light");
-  if (key === "k") attack(player, "heavy");
-  if (key === "l") attack(player, "special");
-  if (key === "p" && state === "fight") paused = !paused;
+moveButtons.forEach((btn) => {
+  btn.addEventListener("click", () => {
+    if (state !== "fight" || turnLocked || roundOver) return;
+    runTurn(btn.dataset.move);
+  });
 });
 
-window.addEventListener("keyup", (event) => {
-  keys.delete(event.key.toLowerCase());
+window.addEventListener("keydown", (event) => {
+  if (state !== "fight" || turnLocked || roundOver) return;
+  const key = event.key.toLowerCase();
+  if (key === "j") runTurn("light");
+  if (key === "k") runTurn("heavy");
+  if (key === "l") runTurn("special");
+  if (key === " " || key === "s") runTurn("block");
 });
 
 startButton.addEventListener("click", startMatch);

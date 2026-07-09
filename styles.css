@@ -186,6 +186,64 @@ h1 {
   transform: translate(-50%, -50%) scale(1);
 }
 
+.battle-ui.hidden {
+  display: none;
+}
+
+.battle-ui {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  justify-content: center;
+  padding: clamp(8px, 1.6vw, 16px);
+  background: linear-gradient(0deg, rgba(9, 12, 16, 0.92) 0%, rgba(9, 12, 16, 0.55) 78%, transparent 100%);
+}
+
+.action-menu {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: clamp(6px, 1vw, 10px);
+  width: min(100%, 640px);
+}
+
+.move-btn {
+  min-width: 0;
+  padding: clamp(8px, 1.6vw, 14px) clamp(6px, 1vw, 10px);
+  color: #12151a;
+  font-family: Bangers, Impact, sans-serif;
+  font-size: clamp(0.95rem, 2vw, 1.5rem);
+  letter-spacing: 0.02em;
+  border: 0;
+  border-radius: 8px;
+  background: linear-gradient(#f7f2dc, #d8cfa9);
+  box-shadow: 0 5px 0 #7a7154, 0 10px 18px rgba(0, 0, 0, 0.3);
+  cursor: pointer;
+}
+
+.move-btn.special {
+  background: linear-gradient(#8de8ff, #20a7e0);
+  box-shadow: 0 5px 0 #12556e, 0 10px 18px rgba(0, 0, 0, 0.3);
+}
+
+.move-btn.block {
+  background: linear-gradient(#ffd27a, #ff9a2d);
+  box-shadow: 0 5px 0 #7d4a13, 0 10px 18px rgba(0, 0, 0, 0.3);
+}
+
+.move-btn:disabled {
+  color: #6b7280;
+  background: linear-gradient(#3a4048, #262b31);
+  box-shadow: 0 5px 0 #14171b, 0 10px 18px rgba(0, 0, 0, 0.3);
+  cursor: not-allowed;
+}
+
+.move-btn:not(:disabled):active {
+  transform: translateY(3px);
+  box-shadow: 0 2px 0 #7a7154, 0 6px 12px rgba(0, 0, 0, 0.3);
+}
+
 .controls {
   display: grid;
   grid-template-columns: repeat(7, minmax(0, 1fr));

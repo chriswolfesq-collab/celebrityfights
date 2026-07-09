@@ -102,17 +102,15 @@ h1 {
 .fighter-card {
   min-width: 0;
   min-height: 250px;
-  display: grid;
-  grid-template-rows: minmax(104px, 1fr) auto auto auto auto;
-  gap: 7px;
-  padding: clamp(10px, 1.6vw, 16px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 0;
   color: white;
   text-align: left;
-  border: 3px solid rgba(255, 255, 255, 0.38);
+  border: 3px solid color-mix(in srgb, var(--card-color) 65%, white 35%);
   border-radius: 8px;
-  background:
-    linear-gradient(180deg, transparent 0%, rgba(0, 0, 0, 0.64) 70%),
-    var(--card-color);
+  background: var(--card-color);
   box-shadow: 0 12px 0 rgba(0, 0, 0, 0.35);
   cursor: pointer;
 }
@@ -124,17 +122,18 @@ h1 {
 
 .portrait {
   display: block;
-  min-width: 0;
-  justify-self: center;
-  width: min(170px, 34vw);
-  height: clamp(96px, 18vw, 142px);
-  object-fit: contain;
-  object-position: center bottom;
-  filter: drop-shadow(0 10px 8px rgba(0, 0, 0, 0.48));
+  width: 100%;
+  height: clamp(150px, 22vw, 240px);
+  object-fit: cover;
+  object-position: 50% 0%;
 }
 
-.fighter-card.selected .portrait {
-  transform: translateY(-3px) scale(1.04);
+.card-body {
+  display: grid;
+  grid-template-rows: auto auto auto auto;
+  gap: 7px;
+  padding: clamp(10px, 1.6vw, 16px);
+  background: linear-gradient(180deg, transparent 0%, rgba(0, 0, 0, 0.34) 100%);
 }
 
 .trait {
@@ -432,8 +431,7 @@ h1 {
   }
 
   .portrait {
-    width: min(132px, 32vw);
-    height: 106px;
+    height: 130px;
   }
 
   .trait {

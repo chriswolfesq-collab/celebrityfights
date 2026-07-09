@@ -270,10 +270,12 @@ function buildRoster() {
     card.style.setProperty("--card-color", fighter.card);
     card.innerHTML = `
       <img class="portrait" src="${fighter.portrait}" alt="" />
-      <strong>${fighter.name}</strong>
-      <span>${fighter.tag}</span>
-      <em class="trait">${fighter.trait.description}</em>
-      <span class="stats"><b>SPD ${fighter.stats.speed.toFixed(1)}</b><b>PWR ${fighter.stats.power.toFixed(2)}</b></span>
+      <div class="card-body">
+        <strong>${fighter.name}</strong>
+        <span>${fighter.tag}</span>
+        <em class="trait">${fighter.trait.description}</em>
+        <span class="stats"><b>SPD ${fighter.stats.speed.toFixed(1)}</b><b>PWR ${fighter.stats.power.toFixed(2)}</b></span>
+      </div>
     `;
     card.addEventListener("click", () => {
       selectedId = fighter.id;
